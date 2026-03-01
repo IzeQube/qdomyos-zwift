@@ -9655,6 +9655,21 @@ void homeform::loadSettings(const QUrl &filename) {
     }
 }
 
+bool homeform::loadProfile(const QString &profileName) {
+    qDebug() << "homeform::loadProfile" << profileName;
+    QString profilePath = getProfileDir() + "/" + profileName + ".qzs";
+    
+    if (!QFile::exists(profilePath)) {
+        qDebug() << "Profile does not exist:" << profilePath;
+        return false;
+    }
+    
+    QUrl profileUrl = QUrl::fromLocalFile(profilePath);
+    loadSettings(profileUrl);
+    qDebug() << "Profile loaded successfully:" << profileName;
+    return true;
+}
+
 void homeform::deleteSettings(const QUrl &filename) { QFile(filename.toLocalFile()).remove(); }
 void homeform::restoreSettings() { 
     QZSettings::restoreAll(); 
@@ -9690,6 +9705,15 @@ void homeform::saveProfile(QString profilename) {
 }
 
 void homeform::restart() {
+    // Container mode: exit with code for wrapper-handled restart
+    QString containerMode = qEnvironmentVariable("QZ_CONTAINER_MODE");
+    if (containerMode == "1" || containerMode.toLower() == "true" || containerMode.toLower() == "yes") {
+        qDebug() << "Container mode: exiting with restart code" << EXIT_CODE_PROFILE_RESTART;
+        QCoreApplication::exit(EXIT_CODE_PROFILE_RESTART);
+        return;
+    }
+    
+    qDebug() << "Desktop mode: restarting application";
     qApp->quit();
 #if !defined(Q_OS_DARWIN) && !defined(Q_OS_IOS) && !defined(Q_OS_WINRT)
     QProcess::startDetached(qApp->arguments()[0], qApp->arguments());

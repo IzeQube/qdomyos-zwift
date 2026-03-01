@@ -71,9 +71,11 @@ private:
     void publishBinarySensorDiscovery(const QString& sensorType, const QString& name, const QString& stateTopic, const QString& deviceClass = "", const QString& icon = "");
     void publishNumberDiscovery(const QString& entityType, const QString& name, const QString& stateTopic, const QString& commandTopic, double min = 0, double max = 100, double step = 1, const QString& unit = "", const QString& icon = "");
     void publishSwitchDiscovery(const QString& entityType, const QString& name, const QString& stateTopic, const QString& commandTopic, const QString& icon = "");
+    void publishSelectDiscovery(const QString& entityType, const QString& name, const QString& stateTopic, const QString& commandTopic, const QStringList& options, const QString& icon = "");
     QJsonObject getDeviceInfo() const;
     QString getDiscoveryTopic(const QString& component, const QString& objectId) const;
     void removeDiscoveryConfig();
+    QStringList getAvailableProfiles() const;
 
     QMqttClient* m_client;
     QTimer* m_timer;

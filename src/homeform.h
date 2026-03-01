@@ -225,6 +225,8 @@ class homeform : public QObject {
     Q_PROPERTY(bool intervalsicuWebVisible READ intervalsicuWebVisible NOTIFY intervalsicuWebVisibleChanged)
 
   public:
+    static constexpr int EXIT_CODE_PROFILE_RESTART = 42;  // Profile change restart
+    
     static homeform *singleton() { return m_singleton; }
     bluetooth *bluetoothManager;
     QQmlApplicationEngine *getEngine() { return engine; }
@@ -1015,6 +1017,7 @@ public:
     void aboutToQuit();
     void saveSettings(const QUrl &filename);
     static void loadSettings(const QUrl &filename);
+    Q_INVOKABLE static bool loadProfile(const QString &profileName);
     void deleteSettings(const QUrl &filename);
     void restoreSettings();
     void saveProfile(QString profilename);

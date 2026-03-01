@@ -90,7 +90,54 @@ RUN mkdir -p ~/.vnc && \
 RUN touch /root/.Xauthority
 ENV DISPLAY=:99
 
-# Start VNC server with authentication
-CMD vncserver :99 -depth 24 -localhost no -xstartup qdomyos-zwift && \
-    sleep infinity
+# Create xstartup script with profile-aware restart handling
+# Exit code 42: Profile change - restart QZ
+# Exit code 0: Normal exit - stop container
+# Other exit codes: Error/crash - stop container
+RUN mkdir -p ~/.vnc && \
+    echo '#!/bin/bash\n\
+# Redirect output to Docker logs\n\
+exec > /proc/1/fd/1 2>&1\n\
+\n\
+export QZ_CONTAINER_MODE=1\n\
+export DISPLAY=:99\n\
+echo "[$(date)] Starting QDomyos-Zwift container wrapper..."\n\
+echo "QZ_CONTAINER_MODE=$QZ_CONTAINER_MODE"\n\
+\n\
+# Wait for X server to be ready\n\
+sleep 2\n\
+\n\
+while true; do\n\
+    echo "[$(date)] Starting QDomyos-Zwift..."\n\
+    /usr/local/bin/qdomyos-zwift 2>&1 &\n\
+    QZ_PID=$!\n\
+    echo "[$(date)] QZ started with PID $QZ_PID"\n\
+    \n\
+    # Wait for the process\n\
+    wait $QZ_PID\n\
+    EXIT_CODE=$?\n\
+    \n\
+    echo "[$(date)] QZ exited with code $EXIT_CODE"\n\
+    \n\
+    # Exit code 42: Profile change requested - restart\n\
+    if [ $EXIT_CODE -eq 42 ]; then\n\
+        echo "[$(date)] Profile change detected (exit code 42), restarting QZ in 2 seconds..."\n\
+        sleep 2\n\
+        continue\n\
+    fi\n\
+    \n\
+    # Exit code 0: Normal exit - stop container\n\
+    if [ $EXIT_CODE -eq 0 ]; then\n\
+        echo "[$(date)] Normal exit (code 0), stopping container..."\n\
+        exit 0\n\
+    fi\n\
+    \n\
+    # Any other exit code: Error/crash - stop container\n\
+    echo "[$(date)] Error exit (code $EXIT_CODE), stopping container..."\n\
+    exit $EXIT_CODE\n\
+done' > ~/.vnc/xstartup && \
+    chmod +x ~/.vnc/xstartup
+
+# Start VNC in foreground with QZ wrapper script
+CMD ["vncserver", ":99", "-depth", "24", "-localhost", "no", "-fg"]
 

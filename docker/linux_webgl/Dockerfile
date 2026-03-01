@@ -91,5 +91,43 @@ COPY --from=builder /usr/local/src/qdomyos-zwift/src/qdomyos-zwift /usr/local/bi
 # Copy WebGL plugin to the appropriate location
 COPY --from=builder /usr/local/src/qtwebglplugin-everywhere/plugins/platforms/libqwebgl.so /usr/lib/x86_64-linux-gnu/qt5/plugins/platforms/libqwebgl.so
 
-# Set the default command to run the application with WebGL
-CMD ["qdomyos-zwift", "-qml", "-platform", "webgl:port=8080"]
+# Create wrapper script with profile-aware restart handling
+# Exit code 42: Profile change - restart QZ
+# Exit code 0: Normal exit - stop container
+# Other exit codes: Error/crash - stop container
+RUN echo '#!/bin/bash\n\
+export QZ_CONTAINER_MODE=1\n\
+echo "[$(date)] Starting QDomyos-Zwift container wrapper..."\n\
+\n\
+while true; do\n\
+    echo "[$(date)] Starting QDomyos-Zwift with WebGL..."\n\
+    /usr/local/bin/qdomyos-zwift -qml -platform webgl:port=8080 2>&1 &\n\
+    QZ_PID=$!\n\
+    echo "[$(date)] QZ started with PID $QZ_PID"\n\
+    \n\
+    wait $QZ_PID\n\
+    EXIT_CODE=$?\n\
+    \n\
+    echo "[$(date)] QZ exited with code $EXIT_CODE"\n\
+    \n\
+    # Exit code 42: Profile change requested - restart\n\
+    if [ $EXIT_CODE -eq 42 ]; then\n\
+        echo "[$(date)] Profile change detected (exit code 42), restarting QZ in 2 seconds..."\n\
+        sleep 2\n\
+        continue\n\
+    fi\n\
+    \n\
+    # Exit code 0: Normal exit - stop container\n\
+    if [ $EXIT_CODE -eq 0 ]; then\n\
+        echo "[$(date)] Normal exit (code 0), stopping container..."\n\
+        exit 0\n\
+    fi\n\
+    \n\
+    # Any other exit code: Error/crash - stop container\n\
+    echo "[$(date)] Error exit (code $EXIT_CODE), stopping container..."\n\
+    exit $EXIT_CODE\n\
+done' > /usr/local/bin/qz-wrapper.sh && \
+    chmod +x /usr/local/bin/qz-wrapper.sh
+
+# Use wrapper script to handle restarts
+CMD ["/usr/local/bin/qz-wrapper.sh"]

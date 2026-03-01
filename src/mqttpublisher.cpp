@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QCoreApplication>
+#include <QTimer>
 
 MQTTPublisher::MQTTPublisher(const QString& host, quint16 port, QString username, QString password, bluetooth* manager, QObject *parent)
     : QObject(parent)
@@ -232,10 +233,48 @@ void MQTTPublisher::onMessageReceived(const QByteArray &message, const QMqttTopi
 }
 
 void MQTTPublisher::handleControlCommand(const QString& command, const QVariant& value) {
-    if(!m_device) return;
-    
     QStringList parts = command.split('/');
     if(parts.isEmpty()) return;
+
+    // Profile loading works without device connected
+    if(parts.size() >= 1 && parts[0] == "profile") {
+        QString profileName;
+        if(parts.size() == 2) {
+            // Command format: profile/profilename
+            profileName = parts[1];
+        } else if(parts.size() == 1) {
+            // Command format: profile with value as profilename
+            profileName = value.toString();
+        }
+        
+        if(!profileName.isEmpty()) {
+            qDebug() << "MQTT: Loading profile:" << profileName;
+            bool success = homeform::loadProfile(profileName);
+            if(success) {
+                qDebug() << "MQTT: Profile loaded successfully:" << profileName;
+                QString confirmTopic = QString("QZ/%1/profile/current").arg(m_userNickname);
+                m_client->publish(QMqttTopicName(confirmTopic), profileName.toUtf8(), 1, true);
+
+                qDebug() << "MQTT: Restarting application in 2 seconds to apply new profile...";
+                QTimer::singleShot(2000, this, []() {
+                    if (homeform::singleton()) {
+                        homeform::singleton()->restart();
+                    } else {
+                        QCoreApplication::exit(homeform::EXIT_CODE_PROFILE_RESTART);
+                    }
+                });
+            } else {
+                qDebug() << "MQTT: Failed to load profile:" << profileName;
+            }
+        }
+        return;
+    }
+    
+    // Other commands require connected device
+    if(!m_device) {
+        qDebug() << "MQTT: Ignoring command, no device connected:" << command;
+        return;
+    }
     
     // Handle device-specific commands (e.g., "bike/resistance", "treadmill/speed")
     if(parts.size() == 2) {
@@ -431,6 +470,50 @@ void MQTTPublisher::publishSwitchDiscovery(const QString& entityType, const QStr
     QJsonDocument doc(config);
     
     m_client->publish(QMqttTopicName(topic), doc.toJson(QJsonDocument::Compact), 1, true);
+}
+
+void MQTTPublisher::publishSelectDiscovery(const QString& entityType, const QString& name, const QString& stateTopic, const QString& commandTopic, const QStringList& options, const QString& icon) {
+    if (!isConnected()) return;
+    
+    QJsonObject config;
+    config["name"] = name;
+    config["unique_id"] = QString("qz_%1_%2").arg(m_userNickname, entityType);
+    config["state_topic"] = stateTopic;
+    config["command_topic"] = commandTopic;
+    config["device"] = getDeviceInfo();
+    
+    QJsonArray optionsArray;
+    for (const QString& option : options) {
+        optionsArray.append(option);
+    }
+    config["options"] = optionsArray;
+    
+    if (!icon.isEmpty()) config["icon"] = icon;
+    
+    QString topic = getDiscoveryTopic("select", entityType);
+    QJsonDocument doc(config);
+    
+    m_client->publish(QMqttTopicName(topic), doc.toJson(QJsonDocument::Compact), 1, true);
+}
+
+QStringList MQTTPublisher::getAvailableProfiles() const {
+    QStringList profiles;
+    QString profileDir = homeform::getProfileDir();
+    QDir dir(profileDir);
+    
+    if (!dir.exists()) {
+        return profiles;
+    }
+    
+    QStringList filters;
+    filters << "*.qzs";
+    QFileInfoList fileList = dir.entryInfoList(filters, QDir::Files, QDir::Name);
+    
+    for (const QFileInfo& fileInfo : fileList) {
+        profiles.append(fileInfo.baseName());
+    }
+    
+    return profiles;
 }
 
 void MQTTPublisher::removeDiscoveryConfig() {
@@ -748,6 +831,22 @@ void MQTTPublisher::publishDiscoveryConfig() {
     
     // Pause switch
     publishSwitchDiscovery("pause", "Pause Workout", statusBaseTopic + "device/paused", controlTopic + "pause", "mdi:pause");
+    
+    // Profile selection
+    QStringList availableProfiles = getAvailableProfiles();
+    if (!availableProfiles.isEmpty()) {
+        QString profileStateTopic = QString("QZ/%1/profile/current").arg(m_userNickname);
+        publishSelectDiscovery("profile", "Active Profile", profileStateTopic, controlTopic + "profile", availableProfiles, "mdi:account-circle");
+    }
+    
+    // Always publish current profile (even if "default")
+    QSettings settings;
+    QString currentProfile = settings.value(QZSettings::profile_name, QZSettings::default_profile_name).toString();
+    if (!currentProfile.isEmpty()) {
+        QString profileTopic = QString("QZ/%1/profile/current").arg(m_userNickname);
+        m_client->publish(QMqttTopicName(profileTopic), currentProfile.toUtf8(), 1, true);
+        qDebug() << "Published current profile to MQTT:" << currentProfile;
+    }
     
     qDebug() << "Home Assistant discovery configuration published";
 }
